@@ -5,10 +5,10 @@ require_once __DIR__ . '/conexao.php';
 $sucesso = "";
 $erro = "";
 
-if (isset($_GET["excluir"])) {
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["excluir"])) {
     try {
         $st = $pdo->prepare("DELETE FROM produto WHERE id_produto = ?");
-        $st->execute([$_GET["excluir"]]);
+        $st->execute([(int)$_POST["excluir"]]);
 
         if ($st->rowCount() > 0) {
             $sucesso = "Produto removido com sucesso!";
@@ -85,7 +85,10 @@ $produtos = $pdo->query("SELECT * FROM produto ORDER BY nome")->fetchAll();
                                 <div class="flex items-center justify-center gap-1.5">
                                     <a href="produto.php?id=<?= $p["id_produto"] ?>" class="bg-senai-blue text-white text-xs px-2.5 py-1.5 rounded-md hover:bg-senai-blue-dark transition" title="Ver produto">🔍 Ver</a>
                                     <a href="movimentacao_form.php?id_produto=<?= $p["id_produto"] ?>" class="bg-yellow-500 text-white text-xs px-2.5 py-1.5 rounded-md hover:bg-yellow-600 transition" title="Movimentar estoque">🔄 Movimentar</a>
-                                    <a onclick="return confirm('Tem certeza disso?')" class="bg-senai-red text-white text-xs px-2.5 py-1.5 rounded-md hover:bg-red-700 transition" href="?excluir=<?= $p["id_produto"] ?>">Excluir</a>
+                                    <form method="post" onsubmit="return confirm('Tem certeza que deseja excluir este produto?')">
+                                        <input type="hidden" name="excluir" value="<?= (int)$p["id_produto"] ?>">
+                                        <button type="submit" class="bg-senai-red text-white text-xs px-2.5 py-1.5 rounded-md hover:bg-red-700 transition">Excluir</button>
+                                    </form>
                                 </div>
                             </td>
                         </tr>

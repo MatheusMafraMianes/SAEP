@@ -7,48 +7,58 @@ $erro = "";
 $id_produto = (int) ($_GET["id_produto"] ?? 0);
 $tipo       = "ENTRADA";
 $quantidade = "";
-$id_user    = 0;
+$id_user    = (int) ($_POST["id_user"] ?? 0);
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-
     $id_produto = (int) ($_POST["id_produto"] ?? 0);
-    $tipo       = $_POST["tipo"] ?? "";
-    $quantidade = (int) ($_POST["quantidade"] ?? 0);
-    $id_user    = (int) ($_POST["id_user"] ?? 0);
+    $tipo = strtoupper(trim($_POST["tipo"] ?? ""));
+    $quantidade = filter_var($_POST["quantidade"] ?? null, FILTER_VALIDATE_INT);
+    $id_user = (int) ($_POST["id_user"] ?? 0);
 
-    $st = $pdo->prepare("SELECT quantidade_estoque FROM produto WHERE id_produto = ?");
-    $st->execute([$id_produto]);
-    $produto = $st->fetch();
-
-    $st = $pdo->prepare("SELECT id_user FROM `user` WHERE id_user = ?");
-    $st->execute([$id_user]);
-    $user = $st->fetch();
-
-    if (!$id_produto || !$quantidade || !$id_user || $tipo === "") {
-        $erro = "Preencha todos os campos!";
-    } elseif ($tipo !== "ENTRADA" && $tipo !== "SAIDA") {
-        $erro = "Tipo não aceito!";
+    if ($id_produto <= 0 || !$quantidade || $id_user <= 0) {
+        $erro = "Preencha todos os campos corretamente!";
+    } elseif (!in_array($tipo, ["ENTRADA", "SAIDA"], true)) {
+        $erro = "Tipo de movimentação inválido!";
     } elseif ($quantidade <= 0) {
-        $erro = "Quantidade inválida!";
-    } elseif (!$produto) {
-        $erro = "Não foi possível encontrar o produto!";
-    } elseif (!$user) {
-        $erro = "Usuário não encontrado!";
-    } elseif ($tipo === "SAIDA" && $produto["quantidade_estoque"] < $quantidade) {
-        $erro = "Estoque insuficiente! Disponível: " . $produto["quantidade_estoque"] . ".";
-    }
+        $erro = "A quantidade deve ser maior que zero.";
+    } else {
+        try {
+            $pdo->beginTransaction();
+            $st = $pdo->prepare("SELECT quantidade_estoque FROM produto WHERE id_produto = ? FOR UPDATE");
+            $st->execute([$id_produto]);
+            $produto = $st->fetch();
 
-    if ($erro === "") {
-        $st = $pdo->prepare("INSERT INTO movimentacao (tipo, quantidade, id_produto, datetime_movimentacao, id_user) VALUES (?, ?, ?, NOW(), ?)");
-        $st->execute([$tipo, $quantidade, $id_produto, $id_user]);
+            $st = $pdo->prepare("SELECT id_user FROM `user` WHERE id_user = ?");
+            $st->execute([$id_user]);
+            $usuario = $st->fetch();
 
-        // ENTRADA soma no estoque, SAIDA subtrai
-        $delta = $tipo === "ENTRADA" ? $quantidade : -$quantidade;
-        $st = $pdo->prepare("UPDATE produto SET quantidade_estoque = quantidade_estoque + ? WHERE id_produto = ?");
-        $st->execute([$delta, $id_produto]);
+            if (!$produto) {
+                throw new RuntimeException("Não foi possível encontrar o produto.");
+            }
+            if (!$usuario) {
+                throw new RuntimeException("Usuário responsável não encontrado.");
+            }
+            if ($tipo === "SAIDA" && (int)$produto["quantidade_estoque"] < $quantidade) {
+                throw new RuntimeException("Estoque insuficiente! Disponível: " . $produto["quantidade_estoque"] . ".");
+            }
 
-        header("Location: movimentacoes.php?salvo=" . strtolower($tipo));
-        exit;
+            $delta = $tipo === "ENTRADA" ? $quantidade : -$quantidade;
+            $st = $pdo->prepare("UPDATE produto SET quantidade_estoque = quantidade_estoque + ? WHERE id_produto = ?");
+            $st->execute([$delta, $id_produto]);
+
+            $st = $pdo->prepare("INSERT INTO movimentacao (tipo, quantidade, id_produto, datetime_movimentacao, id_user) VALUES (?, ?, ?, NOW(), ?)");
+            $st->execute([$tipo, $quantidade, $id_produto, $id_user]);
+
+            $pdo->commit();
+            header("Location: movimentacoes.php?salvo=" . strtolower($tipo));
+            exit;
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $erro = $e->getMessage();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $erro = "Não foi possível registrar a movimentação. Verifique o banco de dados.";
+        }
     }
 }
 

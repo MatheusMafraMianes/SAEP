@@ -5,13 +5,30 @@ require_once __DIR__ . '/conexao.php';
 $sucesso = "";
 $erro = "";
 
-if (isset($_GET["excluir"])) {
-    $st = $pdo->prepare("DELETE FROM movimentacao WHERE id_movimentacao = ?");
-    $st->execute([$_GET["excluir"]]);
-    if ($st->rowCount() > 0) {
-        $sucesso = "Movimentação removida com sucesso!";
-    } else {
-        $erro = "Não foi possível encontrar a movimentação!";
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["excluir"])) {
+    $id_movimentacao = (int) $_POST["excluir"];
+    try {
+        $pdo->beginTransaction();
+        $st = $pdo->prepare("SELECT id_produto, tipo, quantidade FROM movimentacao WHERE id_movimentacao = ? FOR UPDATE");
+        $st->execute([$id_movimentacao]);
+        $mov = $st->fetch();
+
+        if (!$mov) {
+            $erro = "Não foi possível encontrar a movimentação!";
+            $pdo->rollBack();
+        } else {
+            $delta = $mov["tipo"] === "ENTRADA" ? -(int)$mov["quantidade"] : (int)$mov["quantidade"];
+            $st = $pdo->prepare("UPDATE produto SET quantidade_estoque = quantidade_estoque + ? WHERE id_produto = ?");
+            $st->execute([$delta, $mov["id_produto"]]);
+
+            $st = $pdo->prepare("DELETE FROM movimentacao WHERE id_movimentacao = ?");
+            $st->execute([$id_movimentacao]);
+            $pdo->commit();
+            $sucesso = "Movimentação removida e estoque atualizado com sucesso!";
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        $erro = "Não foi possível excluir a movimentação.";
     }
 }
 if (isset($_GET["salvo"])) {
@@ -90,7 +107,10 @@ $movimentacoes = $pdo->query($sql)->fetchAll();
                             <td class="px-4 py-3 text-center text-gray-600"><?= htmlspecialchars($m["usuario"] ?? "-") ?></td>
                             <td class="px-4 py-3 text-center">
                                 <div class="flex items-center justify-center gap-1.5">
-                                    <a onclick="return confirm('Tem certeza disso?')" class="bg-senai-red text-white text-xs px-2.5 py-1.5 rounded-md hover:bg-red-700 transition" href="?excluir=<?= $m["id_movimentacao"] ?>">Excluir</a>
+                                    <form method="post" onsubmit="return confirm('Excluir esta movimentação e reverter seu efeito no estoque?')">
+                                        <input type="hidden" name="excluir" value="<?= (int)$m["id_movimentacao"] ?>">
+                                        <button type="submit" class="bg-senai-red text-white text-xs px-2.5 py-1.5 rounded-md hover:bg-red-700 transition">Excluir</button>
+                                    </form>
                                 </div>
                             </td>
                         </tr>
